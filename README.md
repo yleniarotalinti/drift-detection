@@ -10,7 +10,7 @@
 Ylenia Rotalinti: ylenia.rotalinti@gmail.com 
 
 ## :small_red_triangle_down: Brief
-* We investigated methodologies to address drift detection depending on which information is available during the monitoring process.
+* We investigated methodologies to address drift detection within a regulatory standpoint depending on which information is available during the monitoring process.
 * We explored three different aspects of drift detection: drift based on performance (when labels are available), drift based on model structure (indicating causes of drift) and drift based on change in underlying data characteristics (distribution and correlation) when labels are not available.
 
 # Dataset

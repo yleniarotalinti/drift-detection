@@ -1,0 +1,266 @@
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#libraries
+cat("Libraries loading...\n")
+source("libraries.R")
+
+#functions
+cat("Functions loading...\n")
+source("functions/1_performanceBased_functions.R")
+source("functions/2_structure&unsupervisedBased_functions.R")
+
+#no exponential notation
+options(scipen = 999)
+```
+
+```{r}
+##CHOOSE THE DATASET: {"Abrupt", "Gradual_W10K", "Gradual_W20K"}
+dataset <- "Gradual_W10K"
+
+#flag to select a validation context
+flagValidation <- FALSE
+if(dataset %in% c("Abrupt", "Gradual_W10K", "Gradual_W20K")) flagValidation <- TRUE
+
+#read the data
+read.data(dataset)
+```
+
+```{r}
+#SET THE PARAMETERS
+cat("Setting the parameters...\n")
+parameters<-set.parameters(dataset)
+
+#batch (day/month/year)
+granularity <- parameters$granularity
+cat("GRANULARITY: ", granularity, "\n")
+
+#format (%Y , %Y-%m)
+dateFormat <- parameters$dateFormat
+
+#meaningful column
+dateColumnLabel <- parameters$dateColumnLabel
+classColumnLabel <- parameters$classColumnLabel
+cat("TARGET VARIABLE:", classColumnLabel, "\n")
+
+#how many initial batches to accumulate
+accumulate.batches<-parameters$accumulate.batches
+
+#empirical alpha (0.1%, 1%, 5%)
+alphas <- c("0.001", "0.01", "0.05") 
+cat("ALPHA:\n")
+alphas
+cat("\n")
+
+#number of sampling
+sampling.num <- 10 
+cat("NUMBER OF SAMPLES:", sampling.num, "\n")
+
+rm(parameters)
+```
+
+
+```{r}
+#MODELS 
+models.names <- c(#"lr",
+                  #"nb",
+                  #"tan",
+                  #"nn"
+                  "rf"
+                  )
+cat("MODELS:", paste(models.names, collapse = ", "), "\n")
+```
+```{r}
+#METRICS
+metrics.names <- c("accuracy"
+                   #"sensitivity",
+                   #"specificity",
+                   #"recall",
+                   #"precision",
+                   #"F1",
+                   #"auc",
+                   #"prauc"
+                   #"threshold"
+                   )
+cat("METRICS:", paste(metrics.names, collapse = ", "), "\n")
+
+# FALSE POSITIVE AND FALSE NEGATIVE WEIGHTS 
+if("threshold" %in% metrics.names) {
+  weight.FP <- 0.5
+  weight.FN <- 0.5
+}
+```
+```{r}
+##ANNOTATIONS
+cat("Annotations reading..")
+annotations <- read.annotations(dataset) 
+annotations$ConceptDriftPosition <- as.factor(annotations$ConceptDriftPosition)
+annotations$ConceptDriftWindow <- as.factor(annotations$ConceptDriftWindow)
+```
+
+```{r}
+#BIAS EXPLORATION
+bias.exploration<-data.frame(variable="ALL", level="ALL", label="NOBIAS")
+```
+
+
+```{r}
+#create folders
+generate.folders()
+
+#initialization
+batches<-set.batches(df, granularity)
+validation.table.obj<-validationTableObj.initialization()
+
+#number of runs
+run.num<-1
+
+#progress
+progress<-0
+```
+
+
+```{r}
+####
+# 1.1 PERFORMANCE DRIFT DETECTION (WITH MODEL UPDATING)
+####
+for (r in 1:run.num){
+  for(bias in bias.exploration$label){
+    for(metric in metrics.names){
+      for (alpha in alphas){
+        for (model in models.names){
+          drift.detection <- driftDetection.initialization(bias, metric, alpha, model, "append", "incremental")
+          
+          #main loop
+          progress<-progress+1
+          output.description(r, progress, bias, metric, alpha, model, drift.detection$update, drift.detection$type)
+          while(drift.detection$nextTestSet<=length(batches)){
+            if(flag.firstTrain(drift.detection) | flag.changeDetect(drift.detection)){
+              #set training set and train the model
+              drift.detection$trainingSet<-set.trainingSet(drift.detection)
+              drift.detection$fittedModel<-train.model(drift.detection)
+              
+              #predictions and metric computation
+              drift.detection$controlSetOutput<-get.metrics(drift.detection, "controlSet")
+              drift.detection$nextTestSetOutput<-get.metrics(drift.detection, "nextTestSet")
+              
+              drift.detection$results$plot<-set.plot.records(drift.detection, "controlSet")
+              drift.detection$results$plot<-set.plot.records(drift.detection, "nextTestSet")
+            }
+            
+            ##drift detection
+            drift.detection$results$comparison<-compare.distributions(drift.detection)
+            
+            if(drift.detection$nextTestSet==length(batches)) break
+            
+            if(flag.changeDetect(drift.detection)){
+              drift.detection<-update(drift.detection)
+            } else {
+              if(drift.detection$type=="abrupt"){
+                drift.detection<-increase.set(drift.detection, "controlSet")
+                drift.detection$controlSetOutput<- get.nextTestSet.output(drift.detection) 
+              }
+              
+              drift.detection<-increase.set(drift.detection, "nextTestSet")
+              drift.detection$nextTestSetOutput<-get.metrics(drift.detection, "nextTestSet")
+              drift.detection$results$plot<-set.plot.records(drift.detection, "nextTestSet")
+            }
+          }
+          
+          #update validation table obj
+          validation.table.obj[[bias]][[metric]][[alpha]] <- update.validationTableObj(drift.detection, validation.table.obj)
+          #plot graph
+          save.plot(drift.detection)
+        }
+      }
+    }
+  }
+}
+
+```
+
+```{r}
+#### 
+# 1.2 PERFORMACE DRIFT DETECTION (WITHOUT MODEL UPDATING - i.e. POST-MARKET SURVEILLANCE)
+####
+
+for (r in 1:run.num){
+  for (model in models.names){
+    cat(blue$underline$bold('CONCEPT DRIFT DETECTION:\n'))
+    drift.detection <- driftDetection.initialization(bias=NaN, 
+                                                     metric=NaN, 
+                                                     alpha=NaN, 
+                                                     model=model, 
+                                                     "append", 
+                                                     "incremental")
+    
+    drift.detection$trainingSet<-set.trainingSet(drift.detection)
+    drift.detection$fittedModel<-train.model(drift.detection)
+
+    for(bias in bias.exploration$label){
+      drift.detection$bias<-bias
+      for(metric in metrics.names){
+        drift.detection$metric<-metric
+        #predictions and metric computation
+        drift.detection$controlSetOutput<-get.metrics(drift.detection, "controlSet")
+        drift.detection$results$plot<-set.plot.records(drift.detection, "controlSet")
+        
+        while(drift.detection$nextTestSet<=length(batches)){
+          drift.detection$nextTestSetOutput<-get.metrics(drift.detection, "nextTestSet")
+          drift.detection$results$plot<-set.plot.records(drift.detection, "nextTestSet")
+            
+          #increment test set
+          drift.detection<-increase.set(drift.detection, "nextTestSet")
+        }
+        
+        for (alpha in alphas){
+          drift.detection$alpha<-alpha
+          drift.detection$results$comparison<-check.drifts(drift.detection, alpha)
+          #update validation table obj
+          validation.table.obj[[bias]][[metric]][[alpha]] <- update.validationTableObj(drift.detection, validation.table.obj)
+        }
+        save.surveillancePlot(drift.detection)
+        #initialization 
+        drift.detection$nextTestSet<-drift.detection$controlSet+1
+        drift.detection$results<-list(plot=data.frame(), comparison=data.frame())
+      } 
+    }
+  }
+}
+
+```
+
+```{r}
+##RESULTS COLLECTION
+validation.table.obj.sum <- write.results()
+save(validation.table.obj, validation.table.obj.sum, file=paste("Results/", dataset,"/Results.RData", sep = ""))
+```
+
+```{r}
+### 2. STRUCTURE-BASED DRIFT DETECTION
+featureImportance.df<-get.metric.df(batches)
+featureImportance.distances<-get.distances(featureImportance.df)
+
+plot.distances(featureImportance.distances, "featureImportance")
+plot.featureImportance.df(featureImportance.df)
+
+```
+
+```{r}
+####
+# 3. UNSUPERVISED-BASED DRIFT DETECTION
+####
+
+# 3.1: COMPARE DISTRIBUTIONS OF A FEATURE (@feature to compare)
+#@elevel 
+distribution.df <- get.metric.df(batches, "elevel")
+distribution.distances<-get.distances(distribution.df)
+
+plot.distances(distribution.distances, "distribution", "elevel")
+
+# 3.2: COMPARE CORRELATION MATRIX
+correlation.distances<-get.correlationDistances(batches)
+plot.distances(correlation.distances, "correlation")
+
+```
+
+

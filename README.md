@@ -7,7 +7,7 @@
 
 #### Author:
 
-Ylenia Rotalinti: ylenia.rotalinti@gmail.com \
+Ylenia Rotalinti: ylenia.rotalinti@gmail.com 
 
 ## :small_red_triangle_down: Brief
 * We investigated methodologies to address drift detection depending on which information is available during the monitoring process.

@@ -1,8 +1,7 @@
 
 ### Detecting Drift in Healthcare AI Models based on Data Availability
 
-- Code: 
-- Paper: 
+- Paper: https://link.springer.com/chapter/10.1007/978-3-031-23633-4_17
 
 
 #### Author:
